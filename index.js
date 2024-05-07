@@ -238,7 +238,7 @@ app.get('/members', (req, res) => {
 
     const htmlContent = `
         <h1>Hello, ${req.session.name}!</h1>
-        <img src="./public/${pictureFilename}" alt="Random Cat Picture">
+        <img src="/${pictureFilename}" alt="Random Cat Picture">
         <br>
         <form action="/logout" method="GET">
             <button type="submit">Logout</button>
@@ -248,6 +248,8 @@ app.get('/members', (req, res) => {
     // Send the HTML content as the response
     res.send(htmlContent);
 });
+
+app.use(express.static(__dirname + "/public"));
 
 // Logout route
 app.get('/logout', (req, res) => {
