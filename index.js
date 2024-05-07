@@ -83,6 +83,17 @@ app.post('/submitUser', async (req,res) => {
     var name = req.body.name;
     var password = req.body.password;
 
+    // Check if any field is empty
+    if (!email || !name || !password) {
+        var errorMessage = "All fields are required.";
+        errorMessage += `
+        <form action='/signup' method='get'>
+        <button type="submit">Try Again?</button>
+        </form>
+        `
+        return res.send(errorMessage);
+    }
+
 	const schema = Joi.object(
 		{
 			name: Joi.string().max(50).required(),
@@ -113,10 +124,10 @@ app.post('/submitUser', async (req,res) => {
     var html = `
     Successfully Created User
     <form action="/members" method="get">
-    <button type="submit">Members</button>
+    <button type="submit">Members Area</button>
     </form>
     <form action="/logout" method="get">
-    <button type="submit">LogOut</button>
+    <button type="submit">Logout</button>
     </form>
     `;
     res.send(html);
@@ -197,7 +208,7 @@ app.get('/loggedin', async (req, res) => {
                     <button type="submit">Member</button>
                 </form>
                 <form action="/logout" method="get">
-                    <button type="submit">Log Out</button>
+                    <button type="submit">Logout</button>
                 </form>
             `;
             res.send(html);
@@ -227,7 +238,7 @@ app.get('/members', (req, res) => {
 
     const htmlContent = `
         <h1>Hello, ${req.session.name}!</h1>
-        <img src="/public/${pictureFilename}" alt="Random Cat Picture">
+        <img src="./public/${pictureFilename}" alt="Random Cat Picture">
         <br>
         <form action="/logout" method="GET">
             <button type="submit">Logout</button>
