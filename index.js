@@ -135,6 +135,8 @@ app.post('/submitUser', async (req,res) => {
 
 // Login route
 app.get('/login', (req, res) => {
+    // Check if there is an error parameter in the URL, wont appear if no error is found
+    const errorMessage = req.query.error === 'invalid' ? 'Invalid username/password combination' : '';
     var html = `
     log in
     <form action='/loggingin' method='post'>
@@ -142,49 +144,47 @@ app.get('/login', (req, res) => {
     <input name='password' type='password' placeholder='password'>
     <button>Submit</button>
     </form>
+    ${errorMessage ? `<p>${errorMessage}</p>` : ''}
     `;
     res.send(html);
 });
 
-app.post('/loggingin', async (req,res) => {
+app.post('/loggingin', async (req, res) => {
     var email = req.body.email;
     var password = req.body.password;
 
-	const schema = Joi.string().email().required();
-	const validationResult = schema.validate(email);
-	if (validationResult.error != null) {
-	   console.log(validationResult.error);
-	   res.redirect("/login");
-	   return;
-	}
-
-	const result = await userCollection.find({email: email}).project({email: 1, password: 1, name: 1, _id: 1}).toArray();
-
-	console.log(result);
-	if (result.length != 1) {
-		console.log("user not found");
-		res.redirect("/login");
-		return;
-	}
+    const schema = Joi.string().email().required();
+    const validationResult = schema.validate(email);
     
-    const user = result[0];
+    // If email is not a valid email address, redirect back to login page with an error message
+    if (validationResult.error != null) {
+        console.log(validationResult.error);
+        return res.redirect("/login?error=invalid");
+    }
 
-	if (await bcrypt.compare(password, result[0].password)) {
-		console.log("correct password");
-		req.session.authenticated = true;
-		req.session.email = user.email;
-        req.session.name = user.name;
-		req.session.cookie.maxAge = expireTime;
+    const result = await userCollection.findOne({ email: email });
 
-		res.redirect('/loggedIn');
-		return;
-	}
-	else {
-		console.log("incorrect password");
-		res.redirect("/login");
-		return;
-	}
+    // If user not found, redirect back to login page with an error message
+    if (!result) {
+        console.log("User not found");
+        return res.redirect("/login?error=invalid");
+    }
+
+    // If password is incorrect, redirect back to login page with an error message
+    if (!(await bcrypt.compare(password, result.password))) {
+        console.log("Incorrect password");
+        return res.redirect("/login?error=invalid");
+    }
+
+    // Set session variables and redirect to logged in page
+    req.session.authenticated = true;
+    req.session.email = result.email;
+    req.session.name = result.name;
+    req.session.cookie.maxAge = expireTime;
+
+    res.redirect('/loggedin');
 });
+
 
 app.get('/loggedin', async (req, res) => {
     if (!req.session.authenticated) {
