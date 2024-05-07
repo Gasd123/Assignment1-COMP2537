@@ -1,0 +1,258 @@
+//Copied from the Demo Code
+require("./utils.js");
+
+require('dotenv').config();
+const express = require('express');
+const session = require('express-session');
+const MongoStore = require('connect-mongo');
+const bcrypt = require('bcrypt');
+const saltRounds = 12;
+
+const port = process.env.PORT || 3000;
+
+const app = express();
+
+const Joi = require("joi");
+
+
+const expireTime = 1 * 60 * 60 * 1000; //expires after 1 hour  (hours * minutes * seconds * millis)
+
+/* secret information section */
+const mongodb_host = process.env.MONGODB_HOST;
+const mongodb_user = process.env.MONGODB_USER;
+const mongodb_password = process.env.MONGODB_PASSWORD;
+const mongodb_database = process.env.MONGODB_DATABASE;
+const mongodb_session_secret = process.env.MONGODB_SESSION_SECRET;
+
+const node_session_secret = process.env.NODE_SESSION_SECRET;
+/* END secret section */
+
+var {database} = include('databaseConnection');
+
+const userCollection = database.db(mongodb_database).collection('users');
+
+app.use(express.urlencoded({extended: false}));
+
+var mongoStore = MongoStore.create({
+	mongoUrl: `mongodb+srv://${mongodb_user}:${mongodb_password}@${mongodb_host}/sessions`,
+	crypto: {
+		secret: mongodb_session_secret
+	}
+})
+
+app.use(session({ 
+    secret: node_session_secret,
+	store: mongoStore, //default is memory store 
+	saveUninitialized: false, 
+	resave: true
+}
+));
+//End of copied code
+
+// Home page route
+app.get('/', (req, res) => {
+    if (req.session.user) {
+        // If user is logged in
+        res.send(`Hello, ${req.session.user.name}. <br>
+                  <a href="/members">Members Area</a> | 
+                  <a href="/logout">Logout</a>`);
+    } else {
+        // If user is not logged in
+        res.send(`<a href="/signup">Sign Up</a> | 
+                  <a href="/login">Log In</a>`);
+    }
+});
+
+// Signup route
+app.get('/signup', (req, res) => {
+    var html = `
+    Sign Up
+    <form action='/submitUser' method='post'>
+    <input name='name' type='text' placeholder='name'>
+    <input name='email' type='email' placeholder='email'>
+    <input name='password' type='password' placeholder='password'>
+    <button>Submit</button>
+    </form>
+    `;
+    res.send(html);
+});
+
+//From /signup to submit a new user
+app.post('/submitUser', async (req,res) => {
+    var email = req.body.email;
+    var name = req.body.name;
+    var password = req.body.password;
+
+	const schema = Joi.object(
+		{
+			name: Joi.string().max(50).required(),
+            email: Joi.string().email().required(),
+            password: Joi.string().max(20).required()
+		});
+	
+	const validationResult = schema.validate({email, password, name});
+
+    //if there is an error, it leads back to signup
+	if (validationResult.error != null) {
+	   console.log(validationResult.error);
+	   res.redirect("/signup");
+	   return;
+   }
+
+    var hashedPassword = await bcrypt.hash(password, saltRounds);
+	
+	await userCollection.insertOne({email: email, password: hashedPassword, name: name});
+	console.log("Inserted user");
+
+    // Set user details in the session
+    req.session.authenticated = true;
+    req.session.email = email;
+    req.session.name = name;
+    req.session.cookie.maxAge = expireTime;
+
+    var html = `
+    Successfully Created User
+    <form action="/members" method="get">
+    <button type="submit">Members</button>
+    </form>
+    <form action="/logout" method="get">
+    <button type="submit">LogOut</button>
+    </form>
+    `;
+    res.send(html);
+});
+
+// Login route
+app.get('/login', (req, res) => {
+    var html = `
+    log in
+    <form action='/loggingin' method='post'>
+    <input name='email' type='email' placeholder='email'>
+    <input name='password' type='password' placeholder='password'>
+    <button>Submit</button>
+    </form>
+    `;
+    res.send(html);
+});
+
+app.post('/loggingin', async (req,res) => {
+    var email = req.body.email;
+    var password = req.body.password;
+
+	const schema = Joi.string().email().required();
+	const validationResult = schema.validate(email);
+	if (validationResult.error != null) {
+	   console.log(validationResult.error);
+	   res.redirect("/login");
+	   return;
+	}
+
+	const result = await userCollection.find({email: email}).project({email: 1, password: 1, name: 1, _id: 1}).toArray();
+
+	console.log(result);
+	if (result.length != 1) {
+		console.log("user not found");
+		res.redirect("/login");
+		return;
+	}
+    
+    const user = result[0];
+
+	if (await bcrypt.compare(password, result[0].password)) {
+		console.log("correct password");
+		req.session.authenticated = true;
+		req.session.email = user.email;
+        req.session.name = user.name;
+		req.session.cookie.maxAge = expireTime;
+
+		res.redirect('/loggedIn');
+		return;
+	}
+	else {
+		console.log("incorrect password");
+		res.redirect("/login");
+		return;
+	}
+});
+
+app.get('/loggedin', async (req, res) => {
+    if (!req.session.authenticated) {
+        res.redirect('/login');
+        return;
+    }
+
+    try {
+        const email = req.session.email;
+
+        // Fetch the user's name from the database based on their email
+        const user = await userCollection.findOne({ email: email }, { projection: { name: 1 } });
+
+        if (user) {
+            // If user found, display the logged-in message along with the user's name
+            req.session.name = user.name;
+
+            var html = `
+                Welcome ${user.name}!
+                <form action="/members" method="get">
+                    <button type="submit">Member</button>
+                </form>
+                <form action="/logout" method="get">
+                    <button type="submit">Log Out</button>
+                </form>
+            `;
+            res.send(html);
+        } else {
+            // If user not found, log out the user
+            req.session.destroy();
+            res.redirect('/login');
+        }
+    } catch (error) {
+        console.error('Error fetching user:', error);
+        res.status(500).send('Internal Server Error');
+    }
+});
+
+// Members Area route
+app.get('/members', (req, res) => {
+
+    // If not logged in, redirect to the login page
+    if (!req.session.name) {
+        res.redirect('/login');
+        return; 
+    }
+
+    // Generate a random number between 1 and 3
+    const randomNumber = Math.floor(Math.random() * 3) + 1;
+    const pictureFilename = `${randomNumber}.jpg`;
+
+    const htmlContent = `
+        <h1>Hello, ${req.session.name}!</h1>
+        <img src="/public/${pictureFilename}" alt="Random Cat Picture">
+        <br>
+        <form action="/logout" method="GET">
+            <button type="submit">Logout</button>
+        </form>
+    `;
+
+    // Send the HTML content as the response
+    res.send(htmlContent);
+});
+
+// Logout route
+app.get('/logout', (req, res) => {
+    req.session.destroy((err) => {
+        if (err) {
+            console.error('Error destroying session:', err);
+        }
+        res.redirect('/');
+    });
+});
+
+app.get("*", (req,res) => {
+	res.status(404);
+	res.send("Page not found - 404");
+})
+
+app.listen(port, () => {
+	console.log("Node application listening on port "+port);
+}); 
